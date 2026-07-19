@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Genome Neighborhood Viewer</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: Segoe UI, Arial, sans-serif; font-size: 14px;
+    display: flex; height: 100vh; overflow: hidden; background: #f4f4f6;
+  }
+  #sidebar {
+    width: 320px; flex: none; background: #fff; border-right: 1px solid #ddd;
+    padding: 14px; overflow-y: auto;
+  }
+  #sidebar h1 { font-size: 16px; margin: 0 0 10px; }
+  #sidebar h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #666;
+    margin: 18px 0 6px; border-bottom: 1px solid #eee; padding-bottom: 3px;
+  }
+  .row { margin-bottom: 8px; }
+  .row label {
+    display: flex; justify-content: space-between; font-size: 12.5px; color: #333; margin-bottom: 2px;
+  }
+  .row label span.val { color: #888; font-variant-numeric: tabular-nums; }
+  .row input[type=range] { width: 100%; }
+  .row select, .row input[type=number], .row input[type=text] {
+    width: 100%; padding: 3px 4px; font-size: 12.5px;
+  }
+  .row.checkbox { display: flex; align-items: center; gap: 6px; }
+  .row.checkbox label { margin: 0; }
+  #dropzone {
+    border: 2px dashed #bbb; border-radius: 6px; padding: 14px; text-align: center;
+    font-size: 12.5px; color: #666; cursor: pointer; background: #fafafa;
+  }
+  #dropzone.drag { border-color: #4a90d9; background: #eef5fc; }
+  #status { font-size: 12px; color: #888; margin-top: 6px; min-height: 1.2em; }
+  #status.error { color: #c0392b; }
+  button {
+    padding: 6px 10px; font-size: 12.5px; border: 1px solid #ccc; background: #fff;
+    border-radius: 4px; cursor: pointer;
+  }
+  button:hover { background: #f0f0f0; }
+  button:disabled { opacity: .5; cursor: default; }
+  .btnrow { display: flex; gap: 6px; margin-top: 6px; }
+  #main { flex: 1; overflow: auto; padding: 20px; }
+  #placeholder { color: #999; padding: 40px; font-size: 14px; }
+  svg text { font-family: Segoe UI, Arial, sans-serif; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>Genome Neighborhood Viewer</h1>
+
+  <div id="dropzone">Drop a .sqlite file here<br>or click to browse<input type="file" id="fileInput" accept=".sqlite,.db" style="display:none"></div>
+  <div id="status">Loading SQL engine…</div>
+
+  <h2>Data</h2>
+  <div class="row">
+    <label>Only show these focal accessions (one per line, or comma/space separated; blank = show all)</label>
+    <textarea id="accessionFilter" rows="4" placeholder="e.g.&#10;P42212&#10;P68187" style="width:100%; font-size:12px; font-family:inherit;"></textarea>
+    <div id="accessionFilterStatus" style="font-size:11.5px; color:#888; margin-top:2px;"></div>
+  </div>
+  <div class="row">
+    <label>Window (± bp from focal gene, blank = all) <span class="val" id="val_window"></span></label>
+    <input type="number" id="window" placeholder="no limit">
+  </div>
+
+  <h2>Layout</h2>
+  <div class="row">
+    <label>Pixels per bp <span class="val" id="val_pxPerBp"></span></label>
+    <input type="range" id="pxPerBp" min="0.02" max="1" step="0.01" value="0.15">
+  </div>
+  <div class="row">
+    <label>Row height (px) <span class="val" id="val_rowHeight"></span></label>
+    <input type="range" id="rowHeight" min="40" max="180" step="2" value="90">
+  </div>
+  <div class="row">
+    <label>Gene arrow height (px) <span class="val" id="val_geneHeight"></span></label>
+    <input type="range" id="geneHeight" min="4" max="60" step="1" value="24">
+  </div>
+    <div class="row checkbox">
+    <input type="checkbox" id="showRowLine" checked>
+    <label for="showRowLine">Show row guide line</label>
+  </div>
+
+<h2>Label Column</h2>
+  <div class="row">
+    <label>Label column width (px) <span class="val" id="val_leftMargin"></span></label>
+    <input type="range" id="leftMargin" min="100" max="520" step="10" value="280">
+  </div>
+  <div class="row">
+    <label>Label column font size (px) <span class="val" id="val_rowLabelFontSize"></span></label>
+    <input type="range" id="rowLabelFontSize" min="6" max="22" step="0.5" value="12">
+  </div>
+
+  <h2>Arrows</h2>
+  <div class="row">
+    <label>Focal gene edge width <span class="val" id="val_focalEdge"></span></label>
+    <input type="range" id="focalEdge" min="0" max="6" step="0.1" value="2.5">
+  </div>
+  <div class="row">
+    <label>Neighbor edge width <span class="val" id="val_neighborEdge"></span></label>
+    <input type="range" id="neighborEdge" min="0" max="6" step="0.1" value="1">
+  </div>
+  <div class="row">
+    <label>Arrowhead width factor <span class="val" id="val_headWidthFactor"></span></label>
+    <input type="range" id="headWidthFactor" min="1" max="2" step="0.01" value="1.15">
+  </div>
+  <div class="row">
+    <label>Arrowhead length fraction <span class="val" id="val_headFraction"></span></label>
+    <input type="range" id="headFraction" min="0.05" max="0.5" step="0.01" value="0.25">
+  </div>
+  <div class="row">
+    <label>Arrowhead max length (bp) <span class="val" id="val_headMaxBp"></span></label>
+    <input type="range" id="headMaxBp" min="50" max="2000" step="10" value="400">
+  </div>
+
+  <h2>Labels</h2>
+  <div class="row">
+    <label>Content</label>
+    <select id="labelMode">
+      <option value="accession" selected>UniProt accession</option>
+      <option value="family">Pfam family</option>
+      <option value="desc">Product description</option>
+      <option value="none">None</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Position</label>
+    <select id="labelPos">
+      <option value="below" selected>Below gene</option>
+      <option value="above">Above gene</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Rotation (deg) <span class="val" id="val_labelRotation"></span></label>
+    <input type="range" id="labelRotation" min="-90" max="90" step="1" value="0">
+  </div>
+  <div class="row">
+    <label>Offset from gene (px) <span class="val" id="val_labelOffset"></span></label>
+    <input type="range" id="labelOffset" min="0" max="24" step="1" value="4">
+  </div>
+  <div class="row">
+    <label>Font size (px) <span class="val" id="val_labelFontSize"></span></label>
+    <input type="range" id="labelFontSize" min="6" max="18" step="0.5" value="9">
+  </div>
+
+  <h2>Legend</h2>
+  <div class="row checkbox">
+    <input type="checkbox" id="showLegend">
+    <label for="showLegend">Show Pfam family legend</label>
+  </div>
+  <div class="row">
+    <label>Legend columns <span class="val" id="val_legendCols"></span></label>
+    <input type="range" id="legendCols" min="1" max="6" step="1" value="4">
+  </div>
+
+  <h2>Export</h2>
+  <div class="row">
+    <label>PNG resolution scale <span class="val" id="val_exportScale"></span></label>
+    <input type="range" id="exportScale" min="1" max="4" step="0.5" value="2">
+  </div>
+  <div class="row checkbox">
+    <input type="checkbox" id="transparentPng">
+    <label for="transparentPng">Transparent PNG background</label>
+  </div>
+  <div class="btnrow">
+    <button id="exportPng" disabled>Download PNG</button>
+    <button id="exportSvg" disabled>Download SVG</button>
+  </div>
+  
+  <h2>Vanity</h2>
+	<div class = "row">
+		<label>Coded using Caludo Sonnet 5</label>
+	</div>
+	<div class = "row">
+		<label>Caludo Wrangler - Billion Surya Lioe</label>
+	</div>
+</div>
+
+<div id="main">
+  <div id="placeholder">Load a .sqlite file to begin.</div>
+  <svg id="diagram" xmlns="http://www.w3.org/2000/svg" style="display:none; background:#fff"></svg>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
+<script>
+const SVGNS = "http://www.w3.org/2000/svg";
+let SQLReady = null;
+let neighborhoods = null; // full parsed data, unfiltered
+
+const statusEl = document.getElementById('status');
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const svg = document.getElementById('diagram');
+const placeholder = document.getElementById('placeholder');
+
+function setStatus(msg, isError) {
+  statusEl.textContent = msg;
+  statusEl.className = isError ? 'error' : '';
+}
+
+initSqlJs({ locateFile: f => `https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/${f}` })
+  .then(SQL => { SQLReady = SQL; setStatus('Ready. Drop a .sqlite file.'); })
+  .catch(err => setStatus('Failed to load SQL engine: ' + err.message, true));
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('drag');
+  if (e.dataTransfer.files.length) loadFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => { if (e.target.files.length) loadFile(e.target.files[0]); });
+
+function loadFile(file) {
+  if (!SQLReady) { setStatus('SQL engine still loading, try again in a moment.', true); return; }
+  setStatus('Reading ' + file.name + '…');
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const db = new SQLReady.Database(new Uint8Array(reader.result));
+      neighborhoods = loadNeighborhoods(db);
+      db.close();
+      setStatus(`Loaded ${file.name} — ${neighborhoods.length} neighborhoods.`);
+      placeholder.style.display = 'none';
+      svg.style.display = '';
+      document.getElementById('exportPng').disabled = false;
+      document.getElementById('exportSvg').disabled = false;
+      render();
+    } catch (err) {
+      setStatus('Failed to parse file: ' + err.message, true);
+    }
+  };
+  reader.onerror = () => setStatus('Failed to read file.', true);
+  reader.readAsArrayBuffer(file);
+}
+
+function execToObjects(db, sql, params) {
+  const res = db.exec(sql, params);
+  if (!res.length) return [];
+  const { columns, values } = res[0];
+  return values.map(row => Object.fromEntries(columns.map((c, i) => [c, row[i]])));
+}
+
+function loadNeighborhoods(db) {
+  const focalRows = execToObjects(db, "SELECT sort_key, accession, id, organism FROM attributes ORDER BY sort_key");
+  const result = [];
+  for (const focal of focalRows) {
+    const geneKey = focal.sort_key;
+    const focalGenes = execToObjects(db,
+      "SELECT rel_start, rel_stop, direction, family, desc, color, accession FROM attributes WHERE sort_key = ?",
+      [geneKey]).map(g => ({ ...g, is_focal: 1 }));
+    const neighborGenes = execToObjects(db,
+      "SELECT rel_start, rel_stop, direction, family, desc, color, accession FROM neighbors WHERE gene_key = ? ORDER BY rel_start",
+      [geneKey]).map(g => ({ ...g, is_focal: 0 }));
+    const genes = focalGenes.concat(neighborGenes).sort((a, b) => a.rel_start - b.rel_start);
+    const organism = (focal.organism || '').replace(/\.$/, '');
+    result.push({ organism, accession: focal.accession, contigId: focal.id, genes });
+  }
+  return result;
+}
+
+function firstColor(colorField) {
+  if (!colorField) return '#BEBEBE';
+  const c = colorField.split(',')[0].trim();
+  return c || '#BEBEBE';
+}
+function firstFamily(familyField) {
+  if (!familyField) return '';
+  return familyField.split('-')[0].trim();
+}
+
+function niceStep(range, targetTicks) {
+  const rough = range / targetTicks;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rough)));
+  const residual = rough / magnitude;
+  let step;
+  if (residual < 1.5) step = 1;
+  else if (residual < 3) step = 2;
+  else if (residual < 7) step = 5;
+  else step = 10;
+  return step * magnitude;
+}
+
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+function genePolygonPoints(x1, x2, y, bodyH, headWidthFactor, headLenPx, forward) {
+  const halfBody = bodyH / 2;
+  const halfHead = (bodyH * headWidthFactor) / 2;
+  let pts;
+  if (forward) {
+    let bodyEnd = x2 - headLenPx;
+    if (bodyEnd < x1) bodyEnd = x1;
+    pts = [[x1, y-halfBody],[bodyEnd, y-halfBody],[bodyEnd, y-halfHead],[x2, y],[bodyEnd, y+halfHead],[bodyEnd, y+halfBody],[x1, y+halfBody]];
+  } else {
+    let bodyStart = x1 + headLenPx;
+    if (bodyStart > x2) bodyStart = x2;
+    pts = [[x2, y-halfBody],[bodyStart, y-halfBody],[bodyStart, y-halfHead],[x1, y],[bodyStart, y+halfHead],[bodyStart, y+halfBody],[x2, y+halfBody]];
+  }
+  return pts.map(p => p.join(',')).join(' ');
+}
+
+function getParams() {
+  const num = id => parseFloat(document.getElementById(id).value);
+  const winRaw = document.getElementById('window').value;
+  return {
+    windowBp: winRaw === '' ? null : parseFloat(winRaw),
+    pxPerBp: num('pxPerBp'),
+    rowHeight: num('rowHeight'),
+    geneHeight: num('geneHeight'),
+    leftMargin: num('leftMargin'),
+    rowLabelFontSize: num('rowLabelFontSize'),
+    showRowLine: document.getElementById('showRowLine').checked,
+    focalEdge: num('focalEdge'),
+    neighborEdge: num('neighborEdge'),
+    headWidthFactor: num('headWidthFactor'),
+    headFraction: num('headFraction'),
+    headMaxBp: num('headMaxBp'),
+    labelMode: document.getElementById('labelMode').value,
+    labelPos: document.getElementById('labelPos').value,
+    labelRotation: num('labelRotation'),
+    labelOffset: num('labelOffset'),
+    labelFontSize: num('labelFontSize'),
+    showLegend: document.getElementById('showLegend').checked,
+    legendCols: num('legendCols'),
+  };
+}
+
+function updateReadouts(p) {
+  document.getElementById('val_window').textContent = p.windowBp === null ? 'all' : p.windowBp;
+  document.getElementById('val_pxPerBp').textContent = p.pxPerBp.toFixed(2);
+  document.getElementById('val_rowHeight').textContent = p.rowHeight;
+  document.getElementById('val_geneHeight').textContent = p.geneHeight;
+  document.getElementById('val_leftMargin').textContent = p.leftMargin;
+  document.getElementById('val_rowLabelFontSize').textContent = p.rowLabelFontSize;
+  document.getElementById('val_focalEdge').textContent = p.focalEdge.toFixed(1);
+  document.getElementById('val_neighborEdge').textContent = p.neighborEdge.toFixed(1);
+  document.getElementById('val_headWidthFactor').textContent = p.headWidthFactor.toFixed(2);
+  document.getElementById('val_headFraction').textContent = p.headFraction.toFixed(2);
+  document.getElementById('val_headMaxBp').textContent = p.headMaxBp;
+  document.getElementById('val_labelRotation').textContent = p.labelRotation;
+  document.getElementById('val_labelOffset').textContent = p.labelOffset;
+  document.getElementById('val_labelFontSize').textContent = p.labelFontSize;
+  document.getElementById('val_legendCols').textContent = p.legendCols;
+  document.getElementById('val_exportScale').textContent = document.getElementById('exportScale').value + 'x';
+}
+
+function parseAccessionFilter(raw) {
+  return new Set(
+    raw.split(/[\s,;]+/).map(s => s.trim().toUpperCase()).filter(Boolean)
+  );
+}
+
+function render() {
+  if (!neighborhoods) return;
+  const p = getParams();
+  updateReadouts(p);
+
+  const filterSet = parseAccessionFilter(document.getElementById('accessionFilter').value);
+  let sourceNeighborhoods = neighborhoods;
+  if (filterSet.size) {
+    sourceNeighborhoods = neighborhoods.filter(nb => filterSet.has((nb.accession || '').toUpperCase()));
+    const matched = new Set(sourceNeighborhoods.map(nb => (nb.accession || '').toUpperCase()));
+    const missing = [...filterSet].filter(a => !matched.has(a));
+    document.getElementById('accessionFilterStatus').textContent =
+      `Showing ${sourceNeighborhoods.length} of ${neighborhoods.length} neighborhoods` +
+      (missing.length ? ` (not found: ${missing.join(', ')})` : '');
+  } else {
+    document.getElementById('accessionFilterStatus').textContent = '';
+  }
+
+  const nbs = sourceNeighborhoods.map(nb => {
+    let genes = nb.genes;
+    if (p.windowBp !== null) genes = genes.filter(g => g.rel_start < p.windowBp && g.rel_stop > -p.windowBp);
+    return { organism: nb.organism, accession: nb.accession, contigId: nb.contigId, genes };
+  });
+
+  const allStarts = nbs.flatMap(nb => nb.genes.map(g => g.rel_start));
+  const allStops = nbs.flatMap(nb => nb.genes.map(g => g.rel_stop));
+  if (!allStarts.length) { svg.innerHTML = ''; return; }
+  const xmin = Math.min(...allStarts), xmax = Math.max(...allStops);
+  const xpad = (xmax - xmin) * 0.03;
+  const n = nbs.length;
+
+  const topMargin = 20;
+  const axisHeight = 50;
+  const plotWidth = (xmax - xmin + 2 * xpad) * p.pxPerBp;
+  const totalWidth = p.leftMargin + plotWidth + 20;
+  const rowsHeight = n * p.rowHeight;
+
+  const legendEntries = [];
+  if (p.showLegend) {
+    const seen = new Set();
+    for (const nb of nbs) for (const g of nb.genes) {
+      const fam = firstFamily(g.family);
+      const color = firstColor(g.color);
+      if (!fam) continue;
+      const key = fam + '|' + color;
+      if (!seen.has(key)) { seen.add(key); legendEntries.push({ fam, color, desc: g.desc || fam }); }
+    }
+  }
+  const legendRowH = 18;
+  const legendRows = p.showLegend ? Math.ceil(legendEntries.length / p.legendCols) : 0;
+  const legendHeight = p.showLegend ? (legendRows * legendRowH + 20) : 0;
+
+  const totalHeight = topMargin + rowsHeight + axisHeight + legendHeight;
+
+  svg.setAttribute('width', totalWidth);
+  svg.setAttribute('height', totalHeight);
+  svg.setAttribute('viewBox', `0 0 ${totalWidth} ${totalHeight}`);
+  svg.innerHTML = '';
+
+  const xScale = bp => p.leftMargin + (bp - xmin + xpad) * p.pxPerBp;
+
+  nbs.forEach((nb, row) => {
+    const yCenter = topMargin + row * p.rowHeight + p.rowHeight / 2;
+
+    if (p.showRowLine) {
+      el('line', { x1: p.leftMargin, x2: totalWidth - 20, y1: yCenter, y2: yCenter, stroke: '#999999', 'stroke-width': 2 }, svg);
+    }
+
+    for (const g of nb.genes) {
+      const x1 = xScale(g.rel_start), x2 = xScale(g.rel_stop);
+      const length = x2 - x1;
+      const forward = g.direction !== 'complement';
+      const color = firstColor(g.color);
+      const edgeColor = 'black';
+      const edgeWidth = g.is_focal ? p.focalEdge : p.neighborEdge;
+      const headLenPx = Math.min(length * p.headFraction, p.headMaxBp * p.pxPerBp);
+
+      const pts = genePolygonPoints(x1, x2, yCenter, p.geneHeight, p.headWidthFactor, headLenPx, forward);
+      el('polygon', {
+        points: pts, fill: color, stroke: edgeColor, 'stroke-width': edgeWidth,
+        'stroke-linejoin': 'round',
+      }, svg);
+
+      if (p.labelMode !== 'none') {
+        let text = '';
+        if (p.labelMode === 'family') text = firstFamily(g.family);
+        else if (p.labelMode === 'desc') text = g.desc || '';
+        else text = g.accession || '';
+        if (text) {
+          const cx = (x1 + x2) / 2;
+          let ty, anchor;
+          if (p.labelPos === 'above') { ty = yCenter - p.geneHeight/2 - p.labelOffset; anchor = 'end'; }
+          else { ty = yCenter + p.geneHeight/2 + p.labelOffset; anchor = 'start'; }
+          const baseline = p.labelRotation === 0 ? (p.labelPos === 'above' ? 'baseline' : 'hanging') : 'middle';
+          const t = el('text', {
+            x: cx, y: ty, 'font-size': p.labelFontSize, 'text-anchor': p.labelRotation === 0 ? 'middle' : anchor,
+            'dominant-baseline': baseline,
+            transform: `rotate(${-p.labelRotation}, ${cx}, ${ty})`,
+          }, svg);
+          t.textContent = text;
+        }
+      }
+    }
+
+    const lineGap = Math.max(6, p.rowLabelFontSize * 0.65);
+    const lbl1 = el('text', {
+      x: p.leftMargin - 10, y: yCenter - lineGap, 'text-anchor': 'end', 'dominant-baseline': 'middle', 'font-size': p.rowLabelFontSize,
+    }, svg);
+    lbl1.textContent = nb.organism;
+    const lbl2 = el('text', {
+      x: p.leftMargin - 10, y: yCenter + lineGap, 'text-anchor': 'end', 'dominant-baseline': 'middle', 'font-size': Math.max(6, p.rowLabelFontSize - 1), fill: '#555',
+    }, svg);
+    lbl2.textContent = `${nb.accession} | ${nb.contigId}`;
+  });
+
+  const axisY = topMargin + rowsHeight + 20;
+  el('line', { x1: p.leftMargin, x2: totalWidth - 20, y1: axisY, y2: axisY, stroke: '#333', 'stroke-width': 1 }, svg);
+  const step = niceStep(xmax - xmin, 8);
+  for (let t = Math.ceil(xmin / step) * step; t <= xmax; t += step) {
+    const x = xScale(t);
+    el('line', { x1: x, x2: x, y1: axisY, y2: axisY + 5, stroke: '#333', 'stroke-width': 1 }, svg);
+    const tt = el('text', { x, y: axisY + 18, 'text-anchor': 'middle', 'font-size': 11, fill: '#333' }, svg);
+    tt.textContent = t.toLocaleString();
+  }
+  const axisLabel = el('text', {
+    x: p.leftMargin + plotWidth / 2, y: axisY + 38, 'text-anchor': 'middle', 'font-size': 12, fill: '#333',
+  }, svg);
+  axisLabel.textContent = 'Position relative to focal gene (bp)';
+
+  if (p.showLegend && legendEntries.length) {
+    const legendTop = topMargin + rowsHeight + axisHeight + 10;
+    const colWidth = plotWidth / p.legendCols;
+    legendEntries.forEach((entry, i) => {
+      const col = i % p.legendCols, rowI = Math.floor(i / p.legendCols);
+      const x = p.leftMargin + col * colWidth;
+      const y = legendTop + rowI * legendRowH;
+      el('rect', { x, y: y - 9, width: 10, height: 10, fill: entry.color, stroke: '#000', 'stroke-width': 0.5 }, svg);
+      const txt = el('text', { x: x + 15, y, 'font-size': 10.5, 'dominant-baseline': 'middle' }, svg);
+      txt.textContent = `${entry.fam}: ${entry.desc.slice(0, 45)}`;
+    });
+  }
+}
+
+document.querySelectorAll('#sidebar input, #sidebar select, #sidebar textarea').forEach(inp => {
+  inp.addEventListener('input', render);
+});
+
+function download(filename, blob) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+document.getElementById('exportSvg').addEventListener('click', () => {
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('xmlns', SVGNS);
+  const src = new XMLSerializer().serializeToString(clone);
+  download('genome_neighborhood.svg', new Blob([src], { type: 'image/svg+xml' }));
+});
+
+document.getElementById('exportPng').addEventListener('click', () => {
+  const scale = parseFloat(document.getElementById('exportScale').value);
+  const transparent = document.getElementById('transparentPng').checked;
+  const w = parseFloat(svg.getAttribute('width')), h = parseFloat(svg.getAttribute('height'));
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('xmlns', SVGNS);
+  clone.style.background = transparent ? 'transparent' : '#ffffff';
+  if (!transparent) {
+    const rect = el('rect', { x: 0, y: 0, width: w, height: h, fill: '#ffffff' });
+    clone.insertBefore(rect, clone.firstChild);
+  }
+  const src = new XMLSerializer().serializeToString(clone);
+  const svgBlob = new Blob([src], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(svgBlob);
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = w * scale; canvas.height = h * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(scale, scale);
+    ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(url);
+    canvas.toBlob(blob => download('genome_neighborhood.png', blob), 'image/png');
+  };
+  img.onerror = () => setStatus('PNG export failed to render SVG.', true);
+  img.src = url;
+});
+</script>
+</body>
+</html>
