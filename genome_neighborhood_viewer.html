@@ -67,6 +67,12 @@
     <label>Window (± bp from focal gene, blank = all) <span class="val" id="val_window"></span></label>
     <input type="number" id="window" placeholder="no limit">
   </div>
+  
+  <h2>Links in Arrows</h2>
+  <div class="row checkbox">
+    <input type="checkbox" id="linkToUniprot" checked>
+    <label for="linkToUniprot">Link genes to UniProt (click to open)</label>
+  </div>
 
   <h2>Layout</h2>
   <div class="row">
@@ -173,12 +179,14 @@
   </div>
   
   <h2>Vanity</h2>
+  	<div class = "row">
+		<label>1.1</label>
+	</div>
 	<div class = "row">
 		<label>Coded using Caludo Sonnet 5</label>
 	</div>
 	<div class = "row">
 		<label>Caludo Wrangler - Billion Surya Lioe</label>
-		<label>https://github.com/billionlioe/Html-GND-viewer</label>
 	</div>
 </div>
 
@@ -253,10 +261,10 @@ function loadNeighborhoods(db) {
   for (const focal of focalRows) {
     const geneKey = focal.sort_key;
     const focalGenes = execToObjects(db,
-      "SELECT rel_start, rel_stop, direction, family, desc, color, accession FROM attributes WHERE sort_key = ?",
+      "SELECT rel_start, rel_stop, direction, family, family_desc, ipro_family, ipro_family_desc, desc, color, accession FROM attributes WHERE sort_key = ?",
       [geneKey]).map(g => ({ ...g, is_focal: 1 }));
     const neighborGenes = execToObjects(db,
-      "SELECT rel_start, rel_stop, direction, family, desc, color, accession FROM neighbors WHERE gene_key = ? ORDER BY rel_start",
+      "SELECT rel_start, rel_stop, direction, family, family_desc, ipro_family, ipro_family_desc, desc, color, accession FROM neighbors WHERE gene_key = ? ORDER BY rel_start",
       [geneKey]).map(g => ({ ...g, is_focal: 0 }));
     const genes = focalGenes.concat(neighborGenes).sort((a, b) => a.rel_start - b.rel_start);
     const organism = (focal.organism || '').replace(/\.$/, '');
@@ -273,6 +281,24 @@ function firstColor(colorField) {
 function firstFamily(familyField) {
   if (!familyField) return '';
   return familyField.split('-')[0].trim();
+}
+
+function pairIdsWithDescs(idsField, descField) {
+  if (!idsField || idsField === 'none') return [];
+  const ids = idsField.split('-').map(s => s.trim()).filter(Boolean);
+  const descs = (descField || '').split(';').map(s => s.trim());
+  return ids.map((id, i) => descs[i] ? `${id} (${descs[i]})` : id);
+}
+
+function buildGeneTooltip(g, linked) {
+  const lines = [g.accession];
+  if (g.desc) lines.push(g.desc);
+  const pfam = pairIdsWithDescs(g.family, g.family_desc);
+  if (pfam.length) lines.push('Pfam: ' + pfam.join(', '));
+  const ipro = pairIdsWithDescs(g.ipro_family, g.ipro_family_desc);
+  if (ipro.length) lines.push('InterPro: ' + ipro.join(', '));
+  if (linked) lines.push('Click to open on UniProt');
+  return lines.join('\n');
 }
 
 function niceStep(range, targetTicks) {
@@ -333,6 +359,7 @@ function getParams() {
     labelFontSize: num('labelFontSize'),
     showLegend: document.getElementById('showLegend').checked,
     legendCols: num('legendCols'),
+    linkToUniprot: document.getElementById('linkToUniprot').checked,
   };
 }
 
@@ -438,11 +465,31 @@ function render() {
       const edgeWidth = g.is_focal ? p.focalEdge : p.neighborEdge;
       const headLenPx = Math.min(length * p.headFraction, p.headMaxBp * p.pxPerBp);
 
+      const geneGroup = document.createElementNS(SVGNS, 'g');
+      const tooltip = document.createElementNS(SVGNS, 'title');
+      tooltip.textContent = buildGeneTooltip(g, p.linkToUniprot && !!g.accession);
+      geneGroup.appendChild(tooltip);
+
+      let geneParent = geneGroup;
+      if (p.linkToUniprot && g.accession) {
+        const url = `https://www.uniprot.org/uniprotkb/${g.accession}/entry`;
+        const a = document.createElementNS(SVGNS, 'a');
+        a.setAttribute('href', url);
+        a.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', url);
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener noreferrer');
+        a.style.cursor = 'pointer';
+        a.appendChild(geneGroup);
+        svg.appendChild(a);
+      } else {
+        svg.appendChild(geneGroup);
+      }
+
       const pts = genePolygonPoints(x1, x2, yCenter, p.geneHeight, p.headWidthFactor, headLenPx, forward);
       el('polygon', {
         points: pts, fill: color, stroke: edgeColor, 'stroke-width': edgeWidth,
         'stroke-linejoin': 'round',
-      }, svg);
+      }, geneParent);
 
       if (p.labelMode !== 'none') {
         let text = '';
@@ -459,7 +506,7 @@ function render() {
             x: cx, y: ty, 'font-size': p.labelFontSize, 'text-anchor': p.labelRotation === 0 ? 'middle' : anchor,
             'dominant-baseline': baseline,
             transform: `rotate(${-p.labelRotation}, ${cx}, ${ty})`,
-          }, svg);
+          }, geneParent);
           t.textContent = text;
         }
       }
