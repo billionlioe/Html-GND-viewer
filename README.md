@@ -29,6 +29,9 @@ Nothing else is required — no Python, no npm, no server. All rendering, data p
 ## Notes
 - Expects the EFI-GNT SQLite schema (`attributes` and `neighbors` tables with `rel_start`/`rel_stop`/`direction`/`family`/`color`/`desc`/`accession` columns). Should not be a problem, if downloaded from EFI-GNT.
 
+## Credits
+Coded using Caludo Sonnet 5 
+Caludo wrangler Billion Surya Lioe https://github.com/billionlioe
 
 ## Changelog
 1.1
