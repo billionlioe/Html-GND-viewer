@@ -67,7 +67,29 @@
     <label>Window (± bp from focal gene, blank = all) <span class="val" id="val_window"></span></label>
     <input type="number" id="window" placeholder="no limit">
   </div>
-  
+  <div class="row checkbox">
+    <input type="checkbox" id="windowIndependent">
+    <label for="windowIndependent">Set left and right limits independently</label>
+  </div>
+  <div id="windowSides" style="display:none">
+    <div class="row">
+      <label>Left of focal gene (bp, blank = all)</label>
+      <input type="number" id="windowLeft" placeholder="no limit" min="0">
+    </div>
+    <div class="row">
+      <label>Right of focal gene (bp, blank = all)</label>
+      <input type="number" id="windowRight" placeholder="no limit" min="0">
+    </div>
+  </div>
+  <div class="row">
+    <label>Force orientation (mirrors rows whose focal gene points the other way)</label>
+    <select id="forceOrientation">
+      <option value="off" selected>Off (as stored in data)</option>
+      <option value="right">Focal gene points right →</option>
+      <option value="left">Focal gene points left ←</option>
+    </select>
+  </div>
+
   <h2>Links in Arrows</h2>
   <div class="row checkbox">
     <input type="checkbox" id="linkToUniprot" checked>
@@ -180,13 +202,13 @@
   
   <h2>Vanity</h2>
   	<div class = "row">
-		<label>1.1</label>
+		<label>1.2</label>
 	</div>
 	<div class = "row">
 		<label>Coded using Caludo Sonnet 5</label>
 	</div>
 	<div class = "row">
-		<label>Caludo Wrangler - Billion Surya Lioe https://github.com/billionlioe/</label>
+		<label>Caludo Wrangler - Billion Surya Lioe</label>
 	</div>
 </div>
 
@@ -339,8 +361,14 @@ function genePolygonPoints(x1, x2, y, bodyH, headWidthFactor, headLenPx, forward
 function getParams() {
   const num = id => parseFloat(document.getElementById(id).value);
   const winRaw = document.getElementById('window').value;
+  const lim = raw => raw === '' ? null : Math.abs(parseFloat(raw));
+  const independent = document.getElementById('windowIndependent').checked;
+  const windowBp = lim(winRaw);
   return {
-    windowBp: winRaw === '' ? null : parseFloat(winRaw),
+    windowBp,
+    windowIndependent: independent,
+    windowLeft: independent ? lim(document.getElementById('windowLeft').value) : windowBp,
+    windowRight: independent ? lim(document.getElementById('windowRight').value) : windowBp,
     pxPerBp: num('pxPerBp'),
     rowHeight: num('rowHeight'),
     geneHeight: num('geneHeight'),
@@ -360,11 +388,14 @@ function getParams() {
     showLegend: document.getElementById('showLegend').checked,
     legendCols: num('legendCols'),
     linkToUniprot: document.getElementById('linkToUniprot').checked,
+    forceOrientation: document.getElementById('forceOrientation').value,
   };
 }
 
 function updateReadouts(p) {
-  document.getElementById('val_window').textContent = p.windowBp === null ? 'all' : p.windowBp;
+  document.getElementById('val_window').textContent = p.windowIndependent ? 'off (see L/R)' : (p.windowBp === null ? 'all' : p.windowBp);
+  document.getElementById('window').disabled = p.windowIndependent;
+  document.getElementById('windowSides').style.display = p.windowIndependent ? '' : 'none';
   document.getElementById('val_pxPerBp').textContent = p.pxPerBp.toFixed(2);
   document.getElementById('val_rowHeight').textContent = p.rowHeight;
   document.getElementById('val_geneHeight').textContent = p.geneHeight;
@@ -408,7 +439,21 @@ function render() {
 
   const nbs = sourceNeighborhoods.map(nb => {
     let genes = nb.genes;
-    if (p.windowBp !== null) genes = genes.filter(g => g.rel_start < p.windowBp && g.rel_stop > -p.windowBp);
+    if (p.forceOrientation !== 'off') {
+      const focal = genes.find(g => g.is_focal);
+      const focalRight = focal ? focal.direction !== 'complement' : true;
+      if (focalRight !== (p.forceOrientation === 'right')) {
+        genes = genes.map(g => ({
+          ...g,
+          rel_start: -g.rel_stop,
+          rel_stop: -g.rel_start,
+          direction: g.direction === 'complement' ? 'forward' : 'complement',
+        })).sort((a, b) => a.rel_start - b.rel_start);
+      }
+    }
+    // Window is applied after mirroring so "left"/"right" match what is drawn.
+    if (p.windowLeft !== null) genes = genes.filter(g => g.rel_stop > -p.windowLeft);
+    if (p.windowRight !== null) genes = genes.filter(g => g.rel_start < p.windowRight);
     return { organism: nb.organism, accession: nb.accession, contigId: nb.contigId, genes };
   });
 
